@@ -7,87 +7,60 @@
 /* eslint-disable-next-line no-console */
 
 const http = require('http')
-
-/**
- * @typedef Post
- * @property {string} id
- * @property {string} title
- * @property {string} content
- */
-
-/** @type {Post} */
-const exPost = {
-  id: 'abc',
-  title: 'abc',
-  content: 'abc',
-}
-
-/** @type {Post[]} */
-const posts = [
-  {
-    id: '12',
-    title: 'My first post',
-    content: 'Hello!',
-  },
-  {
-    id: '123',
-    title: 'My second post',
-    content: 'Hello2!',
-  },
-]
+const { routes } = require('./api')
 
 const server = http.createServer((req, res) => {
-  console.log(req.url)
-  const POSTS_ID_REGEX = /^\/posts\/([a-zA-Z0-9-_]+)$/
-  const postIdRegexResult =
-    (req.url && POSTS_ID_REGEX.exec(req.url)) || undefined
+  async function main() {
+    const route = routes.find(
+      (_route) =>
+        req.url &&
+        req.method &&
+        _route.url.test(req.url) &&
+        _route.method === req.method
+    )
 
-  if (req.url === '/posts' && req.method === 'GET') {
-    const result = {
-      posts: posts.map((post) => ({
-        id: post.id,
-        title: post.title,
-      })),
-      totalCount: posts.length,
-    }
-    res.statusCode = 200
-    res.setHeader('Content-Type', 'application/json; charset=utf-8')
-    res.end(JSON.stringify(result))
-    // /^\/posts\/[a-zA-Z0-9-_]+$/.test(req.url)
-  } else if (postIdRegexResult && req.method === 'GET') {
-    // Get /posts/:id
-    const postId = postIdRegexResult[1]
-    console.log('postId', postId)
-
-    const post = posts.find((_post) => _post.id === postId)
-
-    if (post) {
-      res.statusCode = 200
-      res.setHeader('Content-Type', 'application/json; charset=utf-8')
-      res.end(JSON.stringify(post))
-    } else {
+    console.log('route', route)
+    if (!route) {
       res.statusCode = 404
-      res.end('Post Not found')
+      res.end('Not Found.')
+      return
     }
-  } else if (req.url === '/posts' && req.method === 'POST') {
-    req.setEncoding('utf-8')
-    req.on('data', (data) => {
-      console.log(typeof data) // string
-      const body = JSON.parse(data)
-      console.log(body)
-      posts.push({
-        id: body.title.toLowerCase().replace(/\s/g, '_'),
-        title: body.title,
-        content: body.content,
-      })
-    })
 
-    res.statusCode = 200
-    res.end('create post')
-  } else {
-    res.statusCode = 404
-    res.end('Not found')
+    const regexResult = route.url.exec(req.url)
+    if (!regexResult) {
+      res.statusCode = 404
+      res.end('Not Found.')
+      return
+    }
+
+    const reqBody =
+      (req.headers['content-type'] === 'application/json' &&
+        (await new Promise((resolve, reject) => {
+          req.setEncoding('utf-8')
+          req.on('data', (data) => {
+            try {
+              resolve(JSON.parse(data))
+            } catch {
+              reject(new Error('Ill-formed json'))
+            }
+          })
+        }))) ||
+      undefined
+
+    console.log('reqBody', reqBody)
+
+    const result = await route.callback(regexResult, reqBody)
+    res.statusCode = result.statusCode
+
+    if (typeof result.body === 'string') {
+      res.end(result.body)
+    } else {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      res.end(JSON.stringify(result.body))
+    }
   }
+
+  main()
 })
 
 const PORT = 4000
